@@ -384,7 +384,7 @@ def main():
         ],
         states={
             SELECTING_FORMAT: [
-                CallbackQueryHandler(button_callback),
+                CallbackQueryHandler(button_callback, per_message=False),
                 MessageHandler(filters.Regex(r'^/mp3$'), handle_format_command),
                 MessageHandler(filters.Regex(r'^/wav$'), handle_format_command),
             ],
