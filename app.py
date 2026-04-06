@@ -18,6 +18,10 @@ URL_PATTERN = re.compile(
 
 SELECTING_FORMAT = range(1)
 
+LOADING_FRAMES = ["⬇️", "⬇️⬇️", "⬇️⬇️⬇️", "⬇️⬇️⬇️⬇️"]
+CONVERT_FRAMES = ["🔄", "🔄🔄", "🔄🔄🔄", "🔄🔄🔄🔄"]
+SEND_FRAMES = ["📤", "📤📤", "📤📤📤", "📤📤📤📤"]
+
 
 def download_media(url):
     ydl_opts = {
@@ -25,14 +29,17 @@ def download_media(url):
         'outtmpl': os.path.join(TEMP_DIR, '%(id)s.%(ext)s'),
         'quiet': True,
         'no_warnings': True,
+        'postprocessors': [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'm4a',
+        }],
     }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=True)
         video_id = info.get('id', 'audio')
-        ext = info.get('ext', 'm4a')
-        downloaded_file = os.path.join(TEMP_DIR, f"{video_id}.{ext}")
+        downloaded_file = os.path.join(TEMP_DIR, f"{video_id}.m4a")
         if not os.path.exists(downloaded_file):
-            files = [f for f in os.listdir(TEMP_DIR) if video_id in f]
+            files = [f for f in os.listdir(TEMP_DIR) if video_id in f and f.endswith('.m4a')]
             if files:
                 downloaded_file = os.path.join(TEMP_DIR, files[0])
         return {
@@ -59,7 +66,14 @@ def get_video_info(url):
 
 def convert_to_mp3(input_file, title):
     output_file = os.path.join(TEMP_DIR, f"{title}.mp3")
-    cmd = ['ffmpeg', '-i', input_file, '-q:a', '2', '-metadata', f'title={title}', '-y', output_file]
+    cmd = [
+        'ffmpeg', '-i', input_file,
+        '-codec:a', 'libmp3lame',
+        '-b:a', '192k',
+        '-preset', 'fast',
+        '-metadata', f'title={title}',
+        '-y', output_file
+    ]
     subprocess.run(cmd, check=True, capture_output=True)
     if os.path.exists(input_file) and input_file != output_file:
         os.remove(input_file)
@@ -68,11 +82,29 @@ def convert_to_mp3(input_file, title):
 
 def convert_to_wav(input_file, title):
     output_file = os.path.join(TEMP_DIR, f"{title}.wav")
-    cmd = ['ffmpeg', '-i', input_file, '-acodec', 'pcm_s16le', '-metadata', f'title={title}', '-y', output_file]
+    cmd = [
+        'ffmpeg', '-i', input_file,
+        '-codec:a', 'pcm_s16le',
+        '-preset', 'fast',
+        '-metadata', f'title={title}',
+        '-y', output_file
+    ]
     subprocess.run(cmd, check=True, capture_output=True)
     if os.path.exists(input_file) and input_file != output_file:
         os.remove(input_file)
     return output_file
+
+
+async def animated_edit(bot, chat_id, message_id, frames, base_text, interval=0.5):
+    for i, frame in enumerate(frames * 3):
+        try:
+            await bot.edit_message_text(
+                chat_id=chat_id, message_id=message_id,
+                text=f"{frame} {base_text}"
+            )
+        except:
+            pass
+        await asyncio.sleep(interval)
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -153,6 +185,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     audio_format = choice
     chat_id = query.message.chat.id
     message_id = query.message.message_id
+    bot = context.bot
 
     try:
         await query.edit_message_text(text="⬇️ *Downloading...*", parse_mode="Markdown")
@@ -166,10 +199,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         downloaded_file = result['file']
 
-        await context.bot.edit_message_text(
-            chat_id=chat_id, message_id=message_id,
-            text="🔄 *Converting to audio...*", parse_mode="Markdown"
-        )
+        await animated_edit(bot, chat_id, message_id, CONVERT_FRAMES, "*Converting to audio...*", 0.4)
 
         safe_title = "".join(c for c in title if c.isalnum() or c in ' -_').strip()[:50]
 
@@ -181,19 +211,16 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         file_size = os.path.getsize(final_file)
 
         if file_size > MAX_FILE_SIZE:
-            await context.bot.edit_message_text(
+            await bot.edit_message_text(
                 chat_id=chat_id, message_id=message_id,
                 text=f"❌ File too large ({file_size//(1024*1024)}MB). Telegram limit is 50MB."
             )
             os.remove(final_file)
             return ConversationHandler.END
 
-        await context.bot.edit_message_text(
-            chat_id=chat_id, message_id=message_id,
-            text="📤 *Sending file...*", parse_mode="Markdown"
-        )
+        await animated_edit(bot, chat_id, message_id, SEND_FRAMES, "*Sending file...*", 0.3)
 
-        await context.bot.send_audio(
+        await bot.send_audio(
             chat_id=chat_id,
             audio=open(final_file, 'rb'),
             title=safe_title,
@@ -202,9 +229,9 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         os.remove(final_file)
 
-        await context.bot.edit_message_text(
+        await bot.edit_message_text(
             chat_id=chat_id, message_id=message_id,
-            text="✅ Done! Send another URL to convert more."
+            text="✅ *Done!* Send another URL to convert more."
         )
 
     except asyncio.TimeoutError:
