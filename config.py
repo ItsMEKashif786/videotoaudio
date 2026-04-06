@@ -1,5 +1,10 @@
-BOT_TOKEN = "8733769300:AAGhjsNUxDycsH0YbHZ3I65widx5n-7Dvx8"
-MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB Telegram limit
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+MAX_FILE_SIZE = 50 * 1024 * 1024
 DEFAULT_FORMAT = "mp3"
-AUDIO_QUALITY = "192"  # kbps
+AUDIO_QUALITY = "192"
 TEMP_DIR = "/tmp"
