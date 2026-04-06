@@ -3,8 +3,8 @@ import re
 import asyncio
 import subprocess
 import yt_dlp
-from telegram import Update, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
-from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters, ConversationHandler
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters, ConversationHandler, CallbackQueryHandler
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8733769300:AAGhjsNUxDycsH0YbHZ3I65widx5n-7Dvx8")
 MAX_FILE_SIZE = 50 * 1024 * 1024
@@ -78,8 +78,7 @@ def convert_to_wav(input_file, title):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "🎵 *Audio Downloader Bot*\n\n"
-        "Send me any media URL (YouTube, Instagram, etc.) and I'll convert it to audio!\n\n"
-        "Commands:\n/start - Start\n/help - Help\n/cancel - Cancel",
+        "Send me any media URL (YouTube, Instagram, etc.) and I'll convert it to audio!",
         parse_mode="Markdown"
     )
 
@@ -88,16 +87,11 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "📖 *How to use:*\n\n"
         "1. Send me a media URL\n"
-        "2. Choose /mp3 or /wav\n"
+        "2. Click MP3 or WAV button\n"
         "3. Wait for download & conversion\n"
         "4. Receive your audio file!",
         parse_mode="Markdown"
     )
-
-
-async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("❌ Cancelled.", reply_markup=ReplyKeyboardRemove())
-    return ConversationHandler.END
 
 
 def validate_url(text):
@@ -105,9 +99,12 @@ def validate_url(text):
     return match.group(0) if match else None
 
 
-def format_keyboard():
-    keyboard = [["/mp3", "/wav"]]
-    return ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
+def format_inline_keyboard():
+    keyboard = [
+        [InlineKeyboardButton("🎵 MP3", callback_data="mp3"),
+         InlineKeyboardButton("🎶 WAV", callback_data="wav")]
+    ]
+    return InlineKeyboardMarkup(keyboard)
 
 
 async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -130,10 +127,11 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         msg = f"🎬 *{title}*\nDuration: {duration//60}:{duration%60:02d}\n\nChoose audio format:"
         await info_msg.delete()
-        await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=format_keyboard())
+        sent_msg = await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=format_inline_keyboard())
 
         context.user_data['url'] = url
         context.user_data['title'] = title
+        context.user_data['message_id'] = sent_msg.message_id
         return SELECTING_FORMAT
 
     except Exception as e:
@@ -141,20 +139,25 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return None
 
 
-async def handle_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    choice = update.message.text.strip().lower()
+async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    choice = query.data
     url = context.user_data.get('url')
     title = context.user_data.get('title', 'audio')
 
-    if choice == "/mp3":
-        audio_format = "mp3"
-    elif choice == "/wav":
-        audio_format = "wav"
-    else:
-        await update.message.reply_text("Please choose /mp3 or /wav:", reply_markup=format_keyboard())
-        return SELECTING_FORMAT
+    if choice not in ['mp3', 'wav']:
+        return
 
-    await update.message.reply_text("⬇️ *Downloading...*", parse_mode="Markdown", reply_markup=ReplyKeyboardRemove())
+    audio_format = choice
+    chat_id = query.message.chat.id
+    message_id = query.message.message_id
+
+    try:
+        await query.edit_message_text(text="⬇️ *Downloading...*", parse_mode="Markdown")
+    except:
+        pass
 
     try:
         result = await asyncio.wait_for(
@@ -163,7 +166,10 @@ async def handle_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         downloaded_file = result['file']
 
-        await update.message.reply_text("🔄 *Converting to audio...*", parse_mode="Markdown")
+        await context.bot.edit_message_text(
+            chat_id=chat_id, message_id=message_id,
+            text="🔄 *Converting to audio...*", parse_mode="Markdown"
+        )
 
         safe_title = "".join(c for c in title if c.isalnum() or c in ' -_').strip()[:50]
 
@@ -175,25 +181,42 @@ async def handle_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
         file_size = os.path.getsize(final_file)
 
         if file_size > MAX_FILE_SIZE:
-            await update.message.reply_text(f"❌ File too large ({file_size//(1024*1024)}MB). Telegram limit is 50MB.")
+            await context.bot.edit_message_text(
+                chat_id=chat_id, message_id=message_id,
+                text=f"❌ File too large ({file_size//(1024*1024)}MB). Telegram limit is 50MB."
+            )
             os.remove(final_file)
             return ConversationHandler.END
 
-        await update.message.reply_text("📤 *Sending file...*", parse_mode="Markdown")
+        await context.bot.edit_message_text(
+            chat_id=chat_id, message_id=message_id,
+            text="📤 *Sending file...*", parse_mode="Markdown"
+        )
 
-        await update.message.reply_audio(
+        await context.bot.send_audio(
+            chat_id=chat_id,
             audio=open(final_file, 'rb'),
             title=safe_title,
             performer=result.get('uploader', 'Unknown')
         )
 
         os.remove(final_file)
-        await update.message.reply_text("✅ Done! Send another URL to convert more.")
+
+        await context.bot.edit_message_text(
+            chat_id=chat_id, message_id=message_id,
+            text="✅ Done! Send another URL to convert more."
+        )
 
     except asyncio.TimeoutError:
-        await update.message.reply_text("❌ Operation timed out. Video may be too long.")
+        await context.bot.edit_message_text(
+            chat_id=chat_id, message_id=message_id,
+            text="❌ Operation timed out. Video may be too long."
+        )
     except Exception as e:
-        await update.message.reply_text(f"❌ Error: {str(e)}")
+        await context.bot.edit_message_text(
+            chat_id=chat_id, message_id=message_id,
+            text=f"❌ Error: {str(e)}"
+        )
 
     return ConversationHandler.END
 
@@ -204,14 +227,13 @@ def main():
     conv_handler = ConversationHandler(
         entry_points=[MessageHandler(filters.TEXT & ~filters.COMMAND, handle_url)],
         states={
-            SELECTING_FORMAT: [MessageHandler(filters.TEXT, handle_format)],
+            SELECTING_FORMAT: [CallbackQueryHandler(button_callback)],
         },
-        fallbacks=[CommandHandler('cancel', cancel)],
+        fallbacks=[],
     )
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("cancel", cancel))
     application.add_handler(conv_handler)
 
     print("Bot starting...")
