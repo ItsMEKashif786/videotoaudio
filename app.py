@@ -88,7 +88,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "📖 *How to use:*\n\n"
         "1. Send me a media URL\n"
-        "2. Choose MP3 or WAV\n"
+        "2. Choose /mp3 or /wav\n"
         "3. Wait for download & conversion\n"
         "4. Receive your audio file!",
         parse_mode="Markdown"
@@ -106,10 +106,8 @@ def validate_url(text):
 
 
 def format_keyboard():
-    return ReplyKeyboardMarkup(
-        [[KeyboardButton("MP3 🎵"), KeyboardButton("WAV 🎶")]],
-        one_time_keyboard=True, resize_keyboard=True
-    )
+    keyboard = [["/mp3", "/wav"]]
+    return ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
 
 
 async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -144,16 +142,16 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    choice = update.message.text
+    choice = update.message.text.strip().lower()
     url = context.user_data.get('url')
     title = context.user_data.get('title', 'audio')
 
-    if choice.startswith("MP3"):
+    if choice == "/mp3":
         audio_format = "mp3"
-    elif choice.startswith("WAV"):
+    elif choice == "/wav":
         audio_format = "wav"
     else:
-        await update.message.reply_text("Please select MP3 or WAV:", reply_markup=format_keyboard())
+        await update.message.reply_text("Please choose /mp3 or /wav:", reply_markup=format_keyboard())
         return SELECTING_FORMAT
 
     await update.message.reply_text("⬇️ *Downloading...*", parse_mode="Markdown", reply_markup=ReplyKeyboardRemove())
