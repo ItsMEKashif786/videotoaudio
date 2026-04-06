@@ -1,0 +1,6 @@
+name = "telegram-audio-bot-proxy"
+main = "telegram-proxy.js"
+compatibility_date = "2024-01-01"
+
+[vars]
+BOT_TOKEN = "8733769300:AAGhjsNUxDycsH0YbHZ3I65widx5n-7Dvx8"

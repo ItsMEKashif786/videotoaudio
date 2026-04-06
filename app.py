@@ -41,12 +41,6 @@ CONVERT_STATUS = [
     "🚀 Finalizing..."
 ]
 
-SEND_STATUS = [
-    "📤 Uploading your audio...",
-    "💨 Sending it your way...",
-    "✨ Here it comes..."
-]
-
 
 async def edit_message(bot, chat_id, message_id, text, parse_mode=None):
     try:
@@ -181,60 +175,6 @@ def convert_to_wav(input_file, title):
     if os.path.exists(input_file) and input_file != output_file:
         os.remove(input_file)
     return output_file
-
-
-async def process_download(update, context, url, title, audio_format):
-    chat_id = update.effective_chat.id
-    message_id = update.effective_message.message_id
-    bot = context.bot
-    
-    try:
-        for i, status in enumerate(DOWNLOAD_STATUS):
-            percent = int((i + 1) * (100 / len(DOWNLOAD_STATUS)))
-            text = f"⬇️ *Downloading...*\n\n{status}\n\n{progress_bar(percent)}"
-            await edit_message(bot, chat_id, message_id, text, "Markdown")
-            await asyncio.sleep(0.8)
-        
-        result = await asyncio.wait_for(
-            asyncio.to_thread(download_media, url),
-            timeout=600
-        )
-        downloaded_file = result['file']
-        safe_title = "".join(c for c in title if c.isalnum() or c in ' -_').strip()[:50]
-        
-        for i, status in enumerate(CONVERT_STATUS):
-            percent = int((i + 1) * (100 / len(CONVERT_STATUS)))
-            text = f"{'🔄' if i % 2 == 0 else '⚡'} *Converting to {audio_format.upper()}...*\n\n{status}\n\n{progress_bar(percent)}"
-            await edit_message(bot, chat_id, message_id, text, "Markdown")
-            await asyncio.sleep(0.6)
-        
-        if audio_format == "mp3":
-            final_file = convert_to_mp3(downloaded_file, safe_title)
-        else:
-            final_file = convert_to_wav(downloaded_file, safe_title)
-        
-        await edit_message(bot, chat_id, message_id, f"✅ *Complete!*\n\n{progress_bar(100)}", "Markdown")
-        
-        if os.path.exists(downloaded_file) and downloaded_file != final_file:
-            os.remove(downloaded_file)
-
-        file_size = os.path.getsize(final_file)
-
-        if file_size > MAX_FILE_SIZE:
-            await edit_message(bot, chat_id, message_id, f"❌ File too large ({file_size//(1024*1024)}MB). Telegram limit is 50MB.", None)
-            os.remove(final_file)
-            return None, None, result
-
-        await edit_message(bot, chat_id, message_id, "📤 *Sending file...*", "Markdown")
-        
-        return final_file, safe_title, result
-
-    except asyncio.TimeoutError:
-        await edit_message(bot, chat_id, message_id, "❌ Operation timed out.", None)
-        return None, None, None
-    except Exception as e:
-        await edit_message(bot, chat_id, message_id, f"❌ Error: {str(e)}", None)
-        return None, None, None
 
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
