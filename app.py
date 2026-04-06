@@ -18,20 +18,51 @@ URL_PATTERN = re.compile(
 
 SELECTING_FORMAT = range(1)
 
-DOWNLOAD_FRAMES = ["⬇️", "⬇️⬇️", "⬇️⬇️⬇️"]
-CONVERT_FRAMES = ["🔄", "🔁", "🔃"]
 
-
-def progress_bar(percent, length=12):
+def progress_bar(percent, length=10):
     filled = int(length * percent / 100)
-    bar = "█" * filled + "░" * (length - filled)
+    bar = "▓" * filled + "░" * (length - filled)
     return f"[{bar}] {int(percent)}%"
+
+
+DOWNLOAD_STATUS = [
+    "🎧 Downloading your audio...",
+    "⚡ Extracting sound...",
+    "📥 Getting the file...",
+    "✨ Almost there...",
+    "💫 Just a moment..."
+]
+
+CONVERT_STATUS = [
+    "🎶 Converting to MP3...",
+    "🔊 Optimizing audio...",
+    "✨ Perfecting your track...",
+    "💖 Almost ready...",
+    "🚀 Finalizing..."
+]
+
+SEND_STATUS = [
+    "📤 Uploading your audio...",
+    "💨 Sending it your way...",
+    "✨ Here it comes..."
+]
+
+
+async def edit_message(bot, chat_id, message_id, text, parse_mode=None):
+    try:
+        await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=text, parse_mode=parse_mode)
+    except:
+        pass
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "🎵 *Audio Downloader Bot*\n\n"
-        "Send me any media URL and I'll convert it to audio!",
+        "🎵 *Audio Downloader*\n\n"
+        "Send me any media URL and I'll convert it to audio!\n\n"
+        "🎛️ *How to use:*\n"
+        "1. Send a media link\n"
+        "2. Choose MP3 or WAV\n"
+        "3. Get your audio file!",
         parse_mode="Markdown",
         reply_markup=get_reply_keyboard()
     )
@@ -39,20 +70,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "📖 *How to use:*\n\n"
-        "1. Send me a media URL\n"
-        "2. Click MP3/WAV or type /mp3 /wav\n"
-        "3. Wait for download & conversion\n"
-        "4. Receive your audio!",
+        "📖 *Help*\n\n"
+        "Send me any URL from YouTube, Instagram, Twitter, etc.\n"
+        "I'll convert it to audio for you!",
         parse_mode="Markdown",
         reply_markup=get_reply_keyboard()
     )
 
 
 def get_reply_keyboard():
-    keyboard = [
-        [KeyboardButton("/mp3"), KeyboardButton("/wav")]
-    ]
+    keyboard = [[KeyboardButton("/mp3"), KeyboardButton("/wav")]]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
 
 
@@ -90,7 +117,7 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Invalid URL. Please send a valid link.", reply_markup=get_reply_keyboard())
         return None
 
-    info_msg = await update.message.reply_text("🔍 Fetching video info...")
+    info_msg = await update.message.reply_text("🔍 *Fetching video info...*", parse_mode="Markdown")
 
     try:
         info = get_video_info(url)
@@ -101,7 +128,7 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
         title = info.get('title', 'Unknown')
         duration = info.get('duration', 0)
 
-        msg = f"🎬 *{title}*\n⏱️ Duration: {duration//60}:{duration%60:02d}\n\n🎛️ Choose audio format:"
+        msg = f"🎬 *{title}*\n⏱️ Duration: {duration//60}:{duration%60:02d}\n\n🎛️ *Choose audio format:*"
         await info_msg.delete()
         await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=get_inline_keyboard())
 
@@ -112,113 +139,6 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await info_msg.edit_text(f"❌ Error: {str(e)}")
         return None
-
-
-async def handle_format_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text.strip().lower()
-    url = context.user_data.get('url')
-    title = context.user_data.get('title', 'audio')
-    
-    if not url:
-        await update.message.reply_text("❌ No URL found. Please send a media URL first.", reply_markup=get_reply_keyboard())
-        return None
-    
-    if text == "/mp3":
-        audio_format = "mp3"
-    elif text == "/wav":
-        audio_format = "wav"
-    else:
-        return None
-    
-    chat_id = update.message.chat.id
-    message_id = update.message.message_id
-    bot = context.bot
-    
-    await update.message.reply_text("⬇️ *Starting download...*", parse_mode="Markdown", reply_markup=ReplyKeyboardMarkup([[KeyboardButton("/cancel")]], resize_keyboard=True))
-    
-    try:
-        frame = 0
-        for _ in range(15):
-            try:
-                await bot.edit_message_text(
-                    chat_id=chat_id, message_id=message_id,
-                    text=f"{DOWNLOAD_FRAMES[frame % 3]} *Downloading...*\n\n{progress_bar(0)}"
-                )
-            except:
-                pass
-            await asyncio.sleep(0.8)
-            frame += 1
-        
-        result = await asyncio.wait_for(
-            asyncio.to_thread(download_media, url),
-            timeout=600
-        )
-        downloaded_file = result['file']
-        
-        safe_title = "".join(c for c in title if c.isalnum() or c in ' -_').strip()[:50]
-        
-        frame = 0
-        for _ in range(20):
-            try:
-                await bot.edit_message_text(
-                    chat_id=chat_id, message_id=message_id,
-                    text=f"{CONVERT_FRAMES[frame % 3]} *Converting to {audio_format.upper()}...*\n\n{progress_bar(50)}"
-                )
-            except:
-                pass
-            await asyncio.sleep(0.6)
-            frame += 1
-        
-        if audio_format == "mp3":
-            final_file = convert_to_mp3(downloaded_file, safe_title)
-        else:
-            final_file = convert_to_wav(downloaded_file, safe_title)
-        
-        await bot.edit_message_text(
-            chat_id=chat_id, message_id=message_id,
-            text=f"✅ *Converting complete!*\n\n{progress_bar(100)}"
-        )
-        
-        if os.path.exists(downloaded_file) and downloaded_file != final_file:
-            os.remove(downloaded_file)
-        
-        file_size = os.path.getsize(final_file)
-        
-        if file_size > MAX_FILE_SIZE:
-            await bot.edit_message_text(
-                chat_id=chat_id, message_id=message_id,
-                text=f"❌ File too large ({file_size//(1024*1024)}MB). Telegram limit is 50MB."
-            )
-            os.remove(final_file)
-            return ConversationHandler.END
-        
-        await bot.edit_message_text(
-            chat_id=chat_id, message_id=message_id,
-            text="📤 *Sending file...*"
-        )
-        
-        await bot.send_audio(
-            chat_id=chat_id,
-            audio=open(final_file, 'rb'),
-            title=safe_title,
-            performer=result.get('uploader', 'Unknown')
-        )
-        
-        os.remove(final_file)
-        
-        await bot.edit_message_text(
-            chat_id=chat_id, message_id=message_id,
-            text="✅ *Done!* Send another URL to convert more."
-        )
-        
-        await update.message.reply_text("✅ Download complete!", reply_markup=get_reply_keyboard())
-        
-    except asyncio.TimeoutError:
-        await update.message.reply_text("❌ Operation timed out.", reply_markup=get_reply_keyboard())
-    except Exception as e:
-        await update.message.reply_text(f"❌ Error: {str(e)}", reply_markup=get_reply_keyboard())
-    
-    return ConversationHandler.END
 
 
 def download_media(url):
@@ -263,6 +183,60 @@ def convert_to_wav(input_file, title):
     return output_file
 
 
+async def process_download(update, context, url, title, audio_format):
+    chat_id = update.effective_chat.id
+    message_id = update.effective_message.message_id
+    bot = context.bot
+    
+    try:
+        for i, status in enumerate(DOWNLOAD_STATUS):
+            percent = int((i + 1) * (100 / len(DOWNLOAD_STATUS)))
+            text = f"⬇️ *Downloading...*\n\n{status}\n\n{progress_bar(percent)}"
+            await edit_message(bot, chat_id, message_id, text, "Markdown")
+            await asyncio.sleep(0.8)
+        
+        result = await asyncio.wait_for(
+            asyncio.to_thread(download_media, url),
+            timeout=600
+        )
+        downloaded_file = result['file']
+        safe_title = "".join(c for c in title if c.isalnum() or c in ' -_').strip()[:50]
+        
+        for i, status in enumerate(CONVERT_STATUS):
+            percent = int((i + 1) * (100 / len(CONVERT_STATUS)))
+            text = f"{'🔄' if i % 2 == 0 else '⚡'} *Converting to {audio_format.upper()}...*\n\n{status}\n\n{progress_bar(percent)}"
+            await edit_message(bot, chat_id, message_id, text, "Markdown")
+            await asyncio.sleep(0.6)
+        
+        if audio_format == "mp3":
+            final_file = convert_to_mp3(downloaded_file, safe_title)
+        else:
+            final_file = convert_to_wav(downloaded_file, safe_title)
+        
+        await edit_message(bot, chat_id, message_id, f"✅ *Complete!*\n\n{progress_bar(100)}", "Markdown")
+        
+        if os.path.exists(downloaded_file) and downloaded_file != final_file:
+            os.remove(downloaded_file)
+
+        file_size = os.path.getsize(final_file)
+
+        if file_size > MAX_FILE_SIZE:
+            await edit_message(bot, chat_id, message_id, f"❌ File too large ({file_size//(1024*1024)}MB). Telegram limit is 50MB.", None)
+            os.remove(final_file)
+            return None, None, result
+
+        await edit_message(bot, chat_id, message_id, "📤 *Sending file...*", "Markdown")
+        
+        return final_file, safe_title, result
+
+    except asyncio.TimeoutError:
+        await edit_message(bot, chat_id, message_id, "❌ Operation timed out.", None)
+        return None, None, None
+    except Exception as e:
+        await edit_message(bot, chat_id, message_id, f"❌ Error: {str(e)}", None)
+        return None, None, None
+
+
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -280,47 +254,31 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     bot = context.bot
 
     try:
-        frame = 0
-        for _ in range(15):
-            try:
-                await bot.edit_message_text(
-                    chat_id=chat_id, message_id=message_id,
-                    text=f"{DOWNLOAD_FRAMES[frame % 3]} *Downloading...*\n\n{progress_bar(0)}"
-                )
-            except:
-                pass
+        for i, status in enumerate(DOWNLOAD_STATUS):
+            percent = int((i + 1) * (100 / len(DOWNLOAD_STATUS)))
+            text = f"⬇️ *Downloading...*\n\n{status}\n\n{progress_bar(percent)}"
+            await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=text, parse_mode="Markdown")
             await asyncio.sleep(0.8)
-            frame += 1
         
         result = await asyncio.wait_for(
             asyncio.to_thread(download_media, url),
             timeout=600
         )
         downloaded_file = result['file']
-        
         safe_title = "".join(c for c in title if c.isalnum() or c in ' -_').strip()[:50]
         
-        frame = 0
-        for _ in range(20):
-            try:
-                await bot.edit_message_text(
-                    chat_id=chat_id, message_id=message_id,
-                    text=f"{CONVERT_FRAMES[frame % 3]} *Converting to {audio_format.upper()}...*\n\n{progress_bar(50)}"
-                )
-            except:
-                pass
+        for i, status in enumerate(CONVERT_STATUS):
+            percent = int((i + 1) * (100 / len(CONVERT_STATUS)))
+            text = f"{'🔄' if i % 2 == 0 else '⚡'} *Converting to {audio_format.upper()}...*\n\n{status}\n\n{progress_bar(percent)}"
+            await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=text, parse_mode="Markdown")
             await asyncio.sleep(0.6)
-            frame += 1
         
         if audio_format == "mp3":
             final_file = convert_to_mp3(downloaded_file, safe_title)
         else:
             final_file = convert_to_wav(downloaded_file, safe_title)
         
-        await bot.edit_message_text(
-            chat_id=chat_id, message_id=message_id,
-            text=f"✅ *Complete!*\n\n{progress_bar(100)}"
-        )
+        await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=f"✅ *Complete!*\n\n{progress_bar(100)}", parse_mode="Markdown")
         
         if os.path.exists(downloaded_file) and downloaded_file != final_file:
             os.remove(downloaded_file)
@@ -328,17 +286,11 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         file_size = os.path.getsize(final_file)
 
         if file_size > MAX_FILE_SIZE:
-            await bot.edit_message_text(
-                chat_id=chat_id, message_id=message_id,
-                text=f"❌ File too large ({file_size//(1024*1024)}MB)."
-            )
+            await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=f"❌ File too large ({file_size//(1024*1024)}MB).")
             os.remove(final_file)
             return ConversationHandler.END
 
-        await bot.edit_message_text(
-            chat_id=chat_id, message_id=message_id,
-            text="📤 *Sending file...*"
-        )
+        await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text="📤 *Sending file...*", parse_mode="Markdown")
 
         await bot.send_audio(
             chat_id=chat_id,
@@ -349,22 +301,94 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         os.remove(final_file)
 
-        await bot.edit_message_text(
-            chat_id=chat_id, message_id=message_id,
-            text="✅ *Done!* Send another URL."
-        )
+        await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text="✅ *Done! Send another URL.*", parse_mode="Markdown")
 
     except asyncio.TimeoutError:
-        await context.bot.edit_message_text(
-            chat_id=chat_id, message_id=message_id,
-            text="❌ Operation timed out."
-        )
+        await context.bot.edit_message_text(chat_id=chat_id, message_id=message_id, text="❌ Operation timed out.")
     except Exception as e:
-        await context.bot.edit_message_text(
-            chat_id=chat_id, message_id=message_id,
-            text=f"❌ Error: {str(e)}"
-        )
+        await context.bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=f"❌ Error: {str(e)}")
 
+    return ConversationHandler.END
+
+
+async def handle_format_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip().lower()
+    url = context.user_data.get('url')
+    title = context.user_data.get('title', 'audio')
+    
+    if not url:
+        await update.message.reply_text("❌ No URL found. Send a media URL first.", reply_markup=get_reply_keyboard())
+        return None
+    
+    if text == "/mp3":
+        audio_format = "mp3"
+    elif text == "/wav":
+        audio_format = "wav"
+    else:
+        return None
+    
+    chat_id = update.message.chat.id
+    message_id = update.message.message_id
+    bot = context.bot
+    
+    try:
+        for i, status in enumerate(DOWNLOAD_STATUS):
+            percent = int((i + 1) * (100 / len(DOWNLOAD_STATUS)))
+            text_msg = f"⬇️ *Downloading...*\n\n{status}\n\n{progress_bar(percent)}"
+            await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=text_msg, parse_mode="Markdown")
+            await asyncio.sleep(0.8)
+        
+        result = await asyncio.wait_for(
+            asyncio.to_thread(download_media, url),
+            timeout=600
+        )
+        downloaded_file = result['file']
+        
+        safe_title = "".join(c for c in title if c.isalnum() or c in ' -_').strip()[:50]
+        
+        for i, status in enumerate(CONVERT_STATUS):
+            percent = int((i + 1) * (100 / len(CONVERT_STATUS)))
+            text_msg = f"{'🔄' if i % 2 == 0 else '⚡'} *Converting to {audio_format.upper()}...*\n\n{status}\n\n{progress_bar(percent)}"
+            await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=text_msg, parse_mode="Markdown")
+            await asyncio.sleep(0.6)
+        
+        if audio_format == "mp3":
+            final_file = convert_to_mp3(downloaded_file, safe_title)
+        else:
+            final_file = convert_to_wav(downloaded_file, safe_title)
+        
+        await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=f"✅ *Complete!*\n\n{progress_bar(100)}", parse_mode="Markdown")
+        
+        if os.path.exists(downloaded_file) and downloaded_file != final_file:
+            os.remove(downloaded_file)
+        
+        file_size = os.path.getsize(final_file)
+        
+        if file_size > MAX_FILE_SIZE:
+            await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=f"❌ File too large ({file_size//(1024*1024)}MB).")
+            os.remove(final_file)
+            return ConversationHandler.END
+        
+        await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text="📤 *Sending file...*", parse_mode="Markdown")
+        
+        await bot.send_audio(
+            chat_id=chat_id,
+            audio=open(final_file, 'rb'),
+            title=safe_title,
+            performer=result.get('uploader', 'Unknown')
+        )
+        
+        os.remove(final_file)
+        
+        await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text="✅ *Done! Send another URL.*", parse_mode="Markdown")
+        
+        await update.message.reply_text("✅ *Download complete!*", parse_mode="Markdown", reply_markup=get_reply_keyboard())
+        
+    except asyncio.TimeoutError:
+        await update.message.reply_text("❌ Operation timed out.", reply_markup=get_reply_keyboard())
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error: {str(e)}", reply_markup=get_reply_keyboard())
+    
     return ConversationHandler.END
 
 
