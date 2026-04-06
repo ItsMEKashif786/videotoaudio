@@ -18,93 +18,10 @@ URL_PATTERN = re.compile(
 
 SELECTING_FORMAT = range(1)
 
-LOADING_FRAMES = ["⬇️", "⬇️⬇️", "⬇️⬇️⬇️", "⬇️⬇️⬇️⬇️"]
-CONVERT_FRAMES = ["🔄", "🔄🔄", "🔄🔄🔄", "🔄🔄🔄🔄"]
-SEND_FRAMES = ["📤", "📤📤", "📤📤📤", "📤📤📤📤"]
 
-
-def download_media(url):
-    ydl_opts = {
-        'format': 'bestaudio/best',
-        'outtmpl': os.path.join(TEMP_DIR, '%(id)s.%(ext)s'),
-        'quiet': True,
-        'no_warnings': True,
-        'postprocessors': [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'm4a',
-        }],
-    }
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=True)
-        video_id = info.get('id', 'audio')
-        downloaded_file = os.path.join(TEMP_DIR, f"{video_id}.m4a")
-        if not os.path.exists(downloaded_file):
-            files = [f for f in os.listdir(TEMP_DIR) if video_id in f and f.endswith('.m4a')]
-            if files:
-                downloaded_file = os.path.join(TEMP_DIR, files[0])
-        return {
-            'file': downloaded_file,
-            'title': info.get('title', 'audio'),
-            'duration': info.get('duration', 0),
-            'uploader': info.get('uploader', 'Unknown')
-        }
-
-
-def get_video_info(url):
-    ydl_opts = {'quiet': True, 'no_warnings': True}
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        try:
-            info = ydl.extract_info(url, download=False)
-            return {
-                'title': info.get('title', 'Unknown'),
-                'duration': info.get('duration', 0),
-                'uploader': info.get('uploader', 'Unknown'),
-            }
-        except:
-            return None
-
-
-def convert_to_mp3(input_file, title):
-    output_file = os.path.join(TEMP_DIR, f"{title}.mp3")
-    cmd = [
-        'ffmpeg', '-i', input_file,
-        '-codec:a', 'libmp3lame',
-        '-b:a', '192k',
-        '-preset', 'fast',
-        '-metadata', f'title={title}',
-        '-y', output_file
-    ]
-    subprocess.run(cmd, check=True, capture_output=True)
-    if os.path.exists(input_file) and input_file != output_file:
-        os.remove(input_file)
-    return output_file
-
-
-def convert_to_wav(input_file, title):
-    output_file = os.path.join(TEMP_DIR, f"{title}.wav")
-    cmd = [
-        'ffmpeg', '-i', input_file,
-        '-codec:a', 'pcm_s16le',
-        '-preset', 'fast',
-        '-metadata', f'title={title}',
-        '-y', output_file
-    ]
-    subprocess.run(cmd, check=True, capture_output=True)
-    if os.path.exists(input_file) and input_file != output_file:
-        os.remove(input_file)
-    return output_file
-
-
-async def animated_edit(bot, chat_id, message_id, frames, base_text, interval=0.5):
-    for i, frame in enumerate(frames * 3):
-        try:
-            await bot.edit_message_text(
-                chat_id=chat_id, message_id=message_id,
-                text=f"{frame} {base_text}"
-            )
-        except:
-            pass
-        await asyncio.sleep(interval)
+def progress_bar(percent, length=10):
+    filled = int(length * percent / 100)
+    return "█" * filled + "░" * (length - filled)
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -171,6 +88,103 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return None
 
 
+def get_video_info(url):
+    ydl_opts = {'quiet': True, 'no_warnings': True}
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        try:
+            info = ydl.extract_info(url, download=False)
+            return {
+                'title': info.get('title', 'Unknown'),
+                'duration': info.get('duration', 0),
+                'uploader': info.get('uploader', 'Unknown'),
+            }
+        except:
+            return None
+
+
+async def download_with_progress(url, bot, chat_id, message_id, context_user_data):
+    progress_data = {'percent': 0, 'speed': '', 'eta': ''}
+    
+    def progress_hook(d):
+        if d['status'] == 'downloading':
+            total = d.get('total_bytes') or d.get('total_bytes_estimate', 0)
+            if total > 0:
+                progress_data['percent'] = (d['downloaded_bytes'] / total) * 100
+                progress_data['speed'] = d.get('speed', '')
+                progress_data['eta'] = d.get('eta', '')
+    
+    ydl_opts = {
+        'format': 'bestaudio/best',
+        'outtmpl': os.path.join(TEMP_DIR, '%(id)s.%(ext)s'),
+        'quiet': True,
+        'no_warnings': True,
+        'progress_hooks': [progress_hook],
+        'postprocessors': [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'm4a',
+        }],
+    }
+    
+    last_update = 0
+    
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=True)
+        video_id = info.get('id', 'audio')
+        
+        progress_data['percent'] = 100
+        
+        downloaded_file = os.path.join(TEMP_DIR, f"{video_id}.m4a")
+        if not os.path.exists(downloaded_file):
+            files = [f for f in os.listdir(TEMP_DIR) if video_id in f and f.endswith('.m4a')]
+            if files:
+                downloaded_file = os.path.join(TEMP_DIR, files[0])
+        
+        return {
+            'file': downloaded_file,
+            'title': info.get('title', 'audio'),
+            'duration': info.get('duration', 0),
+            'uploader': info.get('uploader', 'Unknown')
+        }
+
+
+async def convert_with_progress(input_file, output_file, bot, chat_id, message_id, title, format_type):
+    cmd = [
+        'ffmpeg', '-i', input_file,
+        '-codec:a', 'libmp3lame' if format_type == 'mp3' else 'pcm_s16le',
+        '-b:a', '192k' if format_type == 'mp3' else '',
+        '-preset', 'fast',
+        '-metadata', f'title={title}',
+        '-y', output_file
+    ]
+    if format_type == 'wav':
+        cmd = ['ffmpeg', '-i', input_file, '-codec:a', 'pcm_s16le', '-preset', 'fast', '-metadata', f'title={title}', '-y', output_file]
+    
+    process = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE
+    )
+    
+    frame = 0
+    frames = ["🔄", "🔁", "🔃", "🔄"]
+    
+    while process.returncode is None:
+        try:
+            await bot.edit_message_text(
+                chat_id=chat_id, message_id=message_id,
+                text=f"{frames[frame % 4]} *Converting to {format_type.upper()}...*\n\n{progress_bar(50)} 50%"
+            )
+        except:
+            pass
+        await asyncio.sleep(1)
+        frame += 1
+    
+    if os.path.exists(input_file) and input_file != output_file:
+        os.remove(input_file)
+    
+    return output_file
+
+
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -188,25 +202,53 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     bot = context.bot
 
     try:
-        await query.edit_message_text(text="⬇️ *Downloading...*", parse_mode="Markdown")
+        await query.edit_message_text(text="⬇️ *Starting download...*", parse_mode="Markdown")
     except:
         pass
 
     try:
         result = await asyncio.wait_for(
-            asyncio.to_thread(download_media, url),
+            download_with_progress(url, bot, chat_id, message_id, context.user_data),
             timeout=600
         )
         downloaded_file = result['file']
 
-        await animated_edit(bot, chat_id, message_id, CONVERT_FRAMES, "*Converting to audio...*", 0.4)
-
         safe_title = "".join(c for c in title if c.isalnum() or c in ' -_').strip()[:50]
-
+        
         if audio_format == "mp3":
-            final_file = convert_to_mp3(downloaded_file, safe_title)
+            final_file = os.path.join(TEMP_DIR, f"{safe_title}.mp3")
+            cmd = ['ffmpeg', '-i', downloaded_file, '-codec:a', 'libmp3lame', '-b:a', '192k', '-preset', 'fast', '-y', final_file]
         else:
-            final_file = convert_to_wav(downloaded_file, safe_title)
+            final_file = os.path.join(TEMP_DIR, f"{safe_title}.wav")
+            cmd = ['ffmpeg', '-i', downloaded_file, '-codec:a', 'pcm_s16le', '-preset', 'fast', '-y', final_file]
+        
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        
+        frame = 0
+        frames = ["🔄", "🔁", "🔃", "🔄"]
+        
+        while process.returncode is None:
+            try:
+                await bot.edit_message_text(
+                    chat_id=chat_id, message_id=message_id,
+                    text=f"{frames[frame % 4]} *Converting to {audio_format.upper()}...*\n\n{progress_bar(50)} 50%"
+                )
+            except:
+                pass
+            await asyncio.sleep(1)
+            frame += 1
+        
+        await bot.edit_message_text(
+            chat_id=chat_id, message_id=message_id,
+            text=f"✅ *Conversion complete!*"
+        )
+        
+        if os.path.exists(downloaded_file) and downloaded_file != final_file:
+            os.remove(downloaded_file)
 
         file_size = os.path.getsize(final_file)
 
@@ -218,7 +260,10 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             os.remove(final_file)
             return ConversationHandler.END
 
-        await animated_edit(bot, chat_id, message_id, SEND_FRAMES, "*Sending file...*", 0.3)
+        await bot.edit_message_text(
+            chat_id=chat_id, message_id=message_id,
+            text="📤 *Sending file...*"
+        )
 
         await bot.send_audio(
             chat_id=chat_id,
