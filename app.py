@@ -131,7 +131,8 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
         duration = info.get('duration', 0)
 
         msg = f"🎬 *{title}*\nDuration: {duration//60}:{duration%60:02d}\n\nChoose audio format:"
-        await info_msg.edit_text(msg, parse_mode="Markdown", reply_markup=format_keyboard())
+        await info_msg.delete()
+        await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=format_keyboard())
 
         context.user_data['url'] = url
         context.user_data['title'] = title
