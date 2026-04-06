@@ -3,7 +3,7 @@ import re
 import asyncio
 import subprocess
 import yt_dlp
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters, ConversationHandler, CallbackQueryHandler
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8733769300:AAGhjsNUxDycsH0YbHZ3I65widx5n-7Dvx8")
@@ -18,17 +18,22 @@ URL_PATTERN = re.compile(
 
 SELECTING_FORMAT = range(1)
 
+DOWNLOAD_FRAMES = ["⬇️", "⬇️⬇️", "⬇️⬇️⬇️"]
+CONVERT_FRAMES = ["🔄", "🔁", "🔃"]
 
-def progress_bar(percent, length=10):
+
+def progress_bar(percent, length=12):
     filled = int(length * percent / 100)
-    return "█" * filled + "░" * (length - filled)
+    bar = "█" * filled + "░" * (length - filled)
+    return f"[{bar}] {int(percent)}%"
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "🎵 *Audio Downloader Bot*\n\n"
-        "Send me any media URL (YouTube, Instagram, etc.) and I'll convert it to audio!",
-        parse_mode="Markdown"
+        "Send me any media URL and I'll convert it to audio!",
+        parse_mode="Markdown",
+        reply_markup=get_reply_keyboard()
     )
 
 
@@ -36,19 +41,22 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "📖 *How to use:*\n\n"
         "1. Send me a media URL\n"
-        "2. Click MP3 or WAV button\n"
+        "2. Click MP3/WAV or type /mp3 /wav\n"
         "3. Wait for download & conversion\n"
-        "4. Receive your audio file!",
-        parse_mode="Markdown"
+        "4. Receive your audio!",
+        parse_mode="Markdown",
+        reply_markup=get_reply_keyboard()
     )
 
 
-def validate_url(text):
-    match = URL_PATTERN.search(text)
-    return match.group(0) if match else None
+def get_reply_keyboard():
+    keyboard = [
+        [KeyboardButton("/mp3"), KeyboardButton("/wav")]
+    ]
+    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
 
 
-def format_inline_keyboard():
+def get_inline_keyboard():
     keyboard = [
         [InlineKeyboardButton("🎵 MP3", callback_data="mp3"),
          InlineKeyboardButton("🎶 WAV", callback_data="wav")]
@@ -56,36 +64,9 @@ def format_inline_keyboard():
     return InlineKeyboardMarkup(keyboard)
 
 
-async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text.strip()
-    url = validate_url(text)
-    if not url:
-        await update.message.reply_text("❌ Invalid URL. Please send a valid link.")
-        return None
-
-    info_msg = await update.message.reply_text("🔍 Fetching video info...")
-
-    try:
-        info = get_video_info(url)
-        if not info:
-            await info_msg.edit_text("❌ Could not fetch video info. URL might be unsupported.")
-            return None
-
-        title = info.get('title', 'Unknown')
-        duration = info.get('duration', 0)
-
-        msg = f"🎬 *{title}*\nDuration: {duration//60}:{duration%60:02d}\n\nChoose audio format:"
-        await info_msg.delete()
-        sent_msg = await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=format_inline_keyboard())
-
-        context.user_data['url'] = url
-        context.user_data['title'] = title
-        context.user_data['message_id'] = sent_msg.message_id
-        return SELECTING_FORMAT
-
-    except Exception as e:
-        await info_msg.edit_text(f"❌ Error: {str(e)}")
-        return None
+def validate_url(text):
+    match = URL_PATTERN.search(text)
+    return match.group(0) if match else None
 
 
 def get_video_info(url):
@@ -102,43 +83,160 @@ def get_video_info(url):
             return None
 
 
-async def download_with_progress(url, bot, chat_id, message_id, context_user_data):
-    progress_data = {'percent': 0, 'speed': '', 'eta': ''}
+async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip()
+    url = validate_url(text)
+    if not url:
+        await update.message.reply_text("❌ Invalid URL. Please send a valid link.", reply_markup=get_reply_keyboard())
+        return None
+
+    info_msg = await update.message.reply_text("🔍 Fetching video info...")
+
+    try:
+        info = get_video_info(url)
+        if not info:
+            await info_msg.edit_text("❌ Could not fetch video info. URL might be unsupported.")
+            return None
+
+        title = info.get('title', 'Unknown')
+        duration = info.get('duration', 0)
+
+        msg = f"🎬 *{title}*\n⏱️ Duration: {duration//60}:{duration%60:02d}\n\n🎛️ Choose audio format:"
+        await info_msg.delete()
+        await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=get_inline_keyboard())
+
+        context.user_data['url'] = url
+        context.user_data['title'] = title
+        return SELECTING_FORMAT
+
+    except Exception as e:
+        await info_msg.edit_text(f"❌ Error: {str(e)}")
+        return None
+
+
+async def handle_format_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip().lower()
+    url = context.user_data.get('url')
+    title = context.user_data.get('title', 'audio')
     
-    def progress_hook(d):
-        if d['status'] == 'downloading':
-            total = d.get('total_bytes') or d.get('total_bytes_estimate', 0)
-            if total > 0:
-                progress_data['percent'] = (d['downloaded_bytes'] / total) * 100
-                progress_data['speed'] = d.get('speed', '')
-                progress_data['eta'] = d.get('eta', '')
+    if not url:
+        await update.message.reply_text("❌ No URL found. Please send a media URL first.", reply_markup=get_reply_keyboard())
+        return None
     
+    if text == "/mp3":
+        audio_format = "mp3"
+    elif text == "/wav":
+        audio_format = "wav"
+    else:
+        return None
+    
+    chat_id = update.message.chat.id
+    message_id = update.message.message_id
+    bot = context.bot
+    
+    await update.message.reply_text("⬇️ *Starting download...*", parse_mode="Markdown", reply_markup=ReplyKeyboardMarkup([[KeyboardButton("/cancel")]], resize_keyboard=True))
+    
+    try:
+        frame = 0
+        for _ in range(15):
+            try:
+                await bot.edit_message_text(
+                    chat_id=chat_id, message_id=message_id,
+                    text=f"{DOWNLOAD_FRAMES[frame % 3]} *Downloading...*\n\n{progress_bar(0)}"
+                )
+            except:
+                pass
+            await asyncio.sleep(0.8)
+            frame += 1
+        
+        result = await asyncio.wait_for(
+            asyncio.to_thread(download_media, url),
+            timeout=600
+        )
+        downloaded_file = result['file']
+        
+        safe_title = "".join(c for c in title if c.isalnum() or c in ' -_').strip()[:50]
+        
+        frame = 0
+        for _ in range(20):
+            try:
+                await bot.edit_message_text(
+                    chat_id=chat_id, message_id=message_id,
+                    text=f"{CONVERT_FRAMES[frame % 3]} *Converting to {audio_format.upper()}...*\n\n{progress_bar(50)}"
+                )
+            except:
+                pass
+            await asyncio.sleep(0.6)
+            frame += 1
+        
+        if audio_format == "mp3":
+            final_file = convert_to_mp3(downloaded_file, safe_title)
+        else:
+            final_file = convert_to_wav(downloaded_file, safe_title)
+        
+        await bot.edit_message_text(
+            chat_id=chat_id, message_id=message_id,
+            text=f"✅ *Converting complete!*\n\n{progress_bar(100)}"
+        )
+        
+        if os.path.exists(downloaded_file) and downloaded_file != final_file:
+            os.remove(downloaded_file)
+        
+        file_size = os.path.getsize(final_file)
+        
+        if file_size > MAX_FILE_SIZE:
+            await bot.edit_message_text(
+                chat_id=chat_id, message_id=message_id,
+                text=f"❌ File too large ({file_size//(1024*1024)}MB). Telegram limit is 50MB."
+            )
+            os.remove(final_file)
+            return ConversationHandler.END
+        
+        await bot.edit_message_text(
+            chat_id=chat_id, message_id=message_id,
+            text="📤 *Sending file...*"
+        )
+        
+        await bot.send_audio(
+            chat_id=chat_id,
+            audio=open(final_file, 'rb'),
+            title=safe_title,
+            performer=result.get('uploader', 'Unknown')
+        )
+        
+        os.remove(final_file)
+        
+        await bot.edit_message_text(
+            chat_id=chat_id, message_id=message_id,
+            text="✅ *Done!* Send another URL to convert more."
+        )
+        
+        await update.message.reply_text("✅ Download complete!", reply_markup=get_reply_keyboard())
+        
+    except asyncio.TimeoutError:
+        await update.message.reply_text("❌ Operation timed out.", reply_markup=get_reply_keyboard())
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error: {str(e)}", reply_markup=get_reply_keyboard())
+    
+    return ConversationHandler.END
+
+
+def download_media(url):
     ydl_opts = {
         'format': 'bestaudio/best',
         'outtmpl': os.path.join(TEMP_DIR, '%(id)s.%(ext)s'),
         'quiet': True,
         'no_warnings': True,
-        'progress_hooks': [progress_hook],
-        'postprocessors': [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'm4a',
-        }],
     }
-    
-    last_update = 0
-    
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=True)
         video_id = info.get('id', 'audio')
-        
-        progress_data['percent'] = 100
-        
-        downloaded_file = os.path.join(TEMP_DIR, f"{video_id}.m4a")
+        ext = info.get('ext', 'm4a')
+        downloaded_file = os.path.join(TEMP_DIR, f"{video_id}.{ext}")
         if not os.path.exists(downloaded_file):
-            files = [f for f in os.listdir(TEMP_DIR) if video_id in f and f.endswith('.m4a')]
+            files = [f for f in os.listdir(TEMP_DIR) if video_id in f]
             if files:
                 downloaded_file = os.path.join(TEMP_DIR, files[0])
-        
         return {
             'file': downloaded_file,
             'title': info.get('title', 'audio'),
@@ -147,41 +245,21 @@ async def download_with_progress(url, bot, chat_id, message_id, context_user_dat
         }
 
 
-async def convert_with_progress(input_file, output_file, bot, chat_id, message_id, title, format_type):
-    cmd = [
-        'ffmpeg', '-i', input_file,
-        '-codec:a', 'libmp3lame' if format_type == 'mp3' else 'pcm_s16le',
-        '-b:a', '192k' if format_type == 'mp3' else '',
-        '-preset', 'fast',
-        '-metadata', f'title={title}',
-        '-y', output_file
-    ]
-    if format_type == 'wav':
-        cmd = ['ffmpeg', '-i', input_file, '-codec:a', 'pcm_s16le', '-preset', 'fast', '-metadata', f'title={title}', '-y', output_file]
-    
-    process = await asyncio.create_subprocess_exec(
-        *cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE
-    )
-    
-    frame = 0
-    frames = ["🔄", "🔁", "🔃", "🔄"]
-    
-    while process.returncode is None:
-        try:
-            await bot.edit_message_text(
-                chat_id=chat_id, message_id=message_id,
-                text=f"{frames[frame % 4]} *Converting to {format_type.upper()}...*\n\n{progress_bar(50)} 50%"
-            )
-        except:
-            pass
-        await asyncio.sleep(1)
-        frame += 1
-    
+def convert_to_mp3(input_file, title):
+    output_file = os.path.join(TEMP_DIR, f"{title}.mp3")
+    cmd = ['ffmpeg', '-i', input_file, '-codec:a', 'libmp3lame', '-b:a', '192k', '-preset', 'fast', '-y', output_file]
+    subprocess.run(cmd, check=True, capture_output=True)
     if os.path.exists(input_file) and input_file != output_file:
         os.remove(input_file)
-    
+    return output_file
+
+
+def convert_to_wav(input_file, title):
+    output_file = os.path.join(TEMP_DIR, f"{title}.wav")
+    cmd = ['ffmpeg', '-i', input_file, '-codec:a', 'pcm_s16le', '-preset', 'fast', '-y', output_file]
+    subprocess.run(cmd, check=True, capture_output=True)
+    if os.path.exists(input_file) and input_file != output_file:
+        os.remove(input_file)
     return output_file
 
 
@@ -202,49 +280,46 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     bot = context.bot
 
     try:
-        await query.edit_message_text(text="⬇️ *Starting download...*", parse_mode="Markdown")
-    except:
-        pass
-
-    try:
-        result = await asyncio.wait_for(
-            download_with_progress(url, bot, chat_id, message_id, context.user_data),
-            timeout=600
-        )
-        downloaded_file = result['file']
-
-        safe_title = "".join(c for c in title if c.isalnum() or c in ' -_').strip()[:50]
-        
-        if audio_format == "mp3":
-            final_file = os.path.join(TEMP_DIR, f"{safe_title}.mp3")
-            cmd = ['ffmpeg', '-i', downloaded_file, '-codec:a', 'libmp3lame', '-b:a', '192k', '-preset', 'fast', '-y', final_file]
-        else:
-            final_file = os.path.join(TEMP_DIR, f"{safe_title}.wav")
-            cmd = ['ffmpeg', '-i', downloaded_file, '-codec:a', 'pcm_s16le', '-preset', 'fast', '-y', final_file]
-        
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-        
         frame = 0
-        frames = ["🔄", "🔁", "🔃", "🔄"]
-        
-        while process.returncode is None:
+        for _ in range(15):
             try:
                 await bot.edit_message_text(
                     chat_id=chat_id, message_id=message_id,
-                    text=f"{frames[frame % 4]} *Converting to {audio_format.upper()}...*\n\n{progress_bar(50)} 50%"
+                    text=f"{DOWNLOAD_FRAMES[frame % 3]} *Downloading...*\n\n{progress_bar(0)}"
                 )
             except:
                 pass
-            await asyncio.sleep(1)
+            await asyncio.sleep(0.8)
             frame += 1
+        
+        result = await asyncio.wait_for(
+            asyncio.to_thread(download_media, url),
+            timeout=600
+        )
+        downloaded_file = result['file']
+        
+        safe_title = "".join(c for c in title if c.isalnum() or c in ' -_').strip()[:50]
+        
+        frame = 0
+        for _ in range(20):
+            try:
+                await bot.edit_message_text(
+                    chat_id=chat_id, message_id=message_id,
+                    text=f"{CONVERT_FRAMES[frame % 3]} *Converting to {audio_format.upper()}...*\n\n{progress_bar(50)}"
+                )
+            except:
+                pass
+            await asyncio.sleep(0.6)
+            frame += 1
+        
+        if audio_format == "mp3":
+            final_file = convert_to_mp3(downloaded_file, safe_title)
+        else:
+            final_file = convert_to_wav(downloaded_file, safe_title)
         
         await bot.edit_message_text(
             chat_id=chat_id, message_id=message_id,
-            text=f"✅ *Conversion complete!*"
+            text=f"✅ *Complete!*\n\n{progress_bar(100)}"
         )
         
         if os.path.exists(downloaded_file) and downloaded_file != final_file:
@@ -255,7 +330,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if file_size > MAX_FILE_SIZE:
             await bot.edit_message_text(
                 chat_id=chat_id, message_id=message_id,
-                text=f"❌ File too large ({file_size//(1024*1024)}MB). Telegram limit is 50MB."
+                text=f"❌ File too large ({file_size//(1024*1024)}MB)."
             )
             os.remove(final_file)
             return ConversationHandler.END
@@ -276,13 +351,13 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await bot.edit_message_text(
             chat_id=chat_id, message_id=message_id,
-            text="✅ *Done!* Send another URL to convert more."
+            text="✅ *Done!* Send another URL."
         )
 
     except asyncio.TimeoutError:
         await context.bot.edit_message_text(
             chat_id=chat_id, message_id=message_id,
-            text="❌ Operation timed out. Video may be too long."
+            text="❌ Operation timed out."
         )
     except Exception as e:
         await context.bot.edit_message_text(
@@ -293,15 +368,30 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
+async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("❌ Cancelled.", reply_markup=get_reply_keyboard())
+    return ConversationHandler.END
+
+
 def main():
     application = Application.builder().token(BOT_TOKEN).build()
 
     conv_handler = ConversationHandler(
-        entry_points=[MessageHandler(filters.TEXT & ~filters.COMMAND, handle_url)],
+        entry_points=[
+            MessageHandler(filters.TEXT & ~filters.COMMAND, handle_url),
+            MessageHandler(filters.Regex(r'^/mp3$'), handle_format_command),
+            MessageHandler(filters.Regex(r'^/wav$'), handle_format_command),
+        ],
         states={
-            SELECTING_FORMAT: [CallbackQueryHandler(button_callback)],
+            SELECTING_FORMAT: [
+                CallbackQueryHandler(button_callback),
+                MessageHandler(filters.Regex(r'^/mp3$'), handle_format_command),
+                MessageHandler(filters.Regex(r'^/wav$'), handle_format_command),
+            ],
         },
-        fallbacks=[],
+        fallbacks=[
+            MessageHandler(filters.Regex(r'^/cancel$'), cancel_command),
+        ],
     )
 
     application.add_handler(CommandHandler("start", start))
