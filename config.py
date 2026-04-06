@@ -1,0 +1,5 @@
+BOT_TOKEN = "8733769300:AAGhjsNUxDycsH0YbHZ3I65widx5n-7Dvx8"
+MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB Telegram limit
+DEFAULT_FORMAT = "mp3"
+AUDIO_QUALITY = "192"  # kbps
+TEMP_DIR = "/tmp"
